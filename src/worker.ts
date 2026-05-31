@@ -182,7 +182,15 @@ export default {
           messages: messages,
         });
 
-        const responseText = aiResponse.response || aiResponse.text || JSON.stringify(aiResponse);
+        // Handle multiple response shapes:
+        // 1. Direct string: { response: "..." } or { text: "..." }
+        // 2. OpenAI-compatible: { choices: [{ message: { content: "..." } }] }
+        const responseText =
+          aiResponse.response ||
+          aiResponse.text ||
+          (aiResponse.choices?.[0]?.message?.content) ||
+          (aiResponse.choices?.[0]?.text) ||
+          JSON.stringify(aiResponse);
 
         return new Response(
           JSON.stringify({ response: responseText, model: activeModel }),
