@@ -7,7 +7,7 @@
     "dev:frontend": "vite",
     "dev:worker": "wrangler dev",
     "build": "vite build",
-    "deploy": "wrangler deploy",
+    "deploy": "vite build && wrangler deploy",
     "start:bot": "node bot.js"
   },
   "dependencies": {
