@@ -7,7 +7,7 @@ export interface Env {
   ALLOWED_EMAILS?: string;
 }
 
-const DEFAULT_MODEL = '@cf/google/gemma-2-9b-it';
+const DEFAULT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
