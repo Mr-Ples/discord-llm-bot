@@ -5,7 +5,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const token = process.env.DISCORD_TOKEN;
-const workerApiUrl = process.env.WORKER_API_URL || 'http://localhost:8787';
+const workerApiUrl = (process.env.WORKER_API_URL || 'https://gemma-discord-worker.sidenotes.workers.dev').replace(/\/$/, '');
 const messageCap = parseInt(process.env.MESSAGE_CAP || '15', 10);
 
 if (!token) {
@@ -101,7 +101,7 @@ Ensure you directly address the queries from users in a conversational manner. K
       throw new Error(`Cloudflare Worker returned ${response.status}: ${errText}`);
     }
 
-    const data = (await response.json()) as { response: string; model: string };
+    const data = await response.json();
     let replyText = data.response;
 
     if (!replyText || replyText.trim().length === 0) {
@@ -121,7 +121,7 @@ Ensure you directly address the queries from users in a conversational manner. K
     });
 
     console.log(`✅ Replied successfully`);
-  } catch (error: any) {
+  } catch (error) {
     console.error('❌ Error handling message:', error);
     try {
       await message.reply(`⚠️ Sorry, I encountered an error processing that request:\n\`\`\`\n${error.message}\n\`\`\``);

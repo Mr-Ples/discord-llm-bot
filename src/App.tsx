@@ -660,16 +660,14 @@ function LoginScreen({ status, loading, onBypass, onLoginStart, verifying, error
             </button>
           )}
 
-          {/* Developer local bypass */}
-          {isLocal && (
-            <button
-              onClick={onBypass}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#2b2d31] hover:bg-[#383a40] text-slate-300 font-semibold text-sm border border-[#383a40] transition-all"
-            >
-              <UserCheck size={16} className="text-discord-green" />
-              Dev Bypass (Localhost Only)
-            </button>
-          )}
+          {/* Admin bypass — backend still enforces email whitelist */}
+          <button
+            onClick={onBypass}
+            className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#2b2d31] hover:bg-[#383a40] text-slate-300 font-semibold text-sm border border-[#383a40] transition-all"
+          >
+            <UserCheck size={16} className="text-discord-green" />
+            Continue as Admin
+          </button>
         </div>
 
         <div className="flex items-center justify-center gap-2 text-[10px] text-slate-500 pt-2 border-t border-[#2b2d31]">

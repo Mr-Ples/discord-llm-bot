@@ -1,5 +1,6 @@
 export interface Env {
   AI: any;
+  ASSETS: Fetcher;
   DISCORD_TOKEN?: string;
   GEMMA_MODEL?: string;
   GOOGLE_CLIENT_ID?: string;
@@ -263,23 +264,10 @@ export default {
       }
 
       // Fallback for Single Page App (Client-side routing)
-      // If the request doesn't match an API route and Wrangler Assets didn't intercept it
-      // (e.g. user hits /console directly), we should serve the index.html so the React Router can load
+      // Route all non-API paths to the ASSETS binding which serves index.html
       const isApiRoute = path.startsWith('/api/');
       if (!isApiRoute) {
-        // Fetch index.html from static assets (which Wrangler makes available)
-        // If we can't fetch it, we just return a 404. Since we have assets directory enabled,
-        // wrangler can serve it or we can fetch the asset. The native way to let wrangler assets serve it
-        // is to allow it to fall through. For Client Side Routing in Workers, we can fetch the index.html from the asset binding.
-        // In Wrangler, we can read the asset by fetching it directly from our own origin.
-        const origin = new URL(request.url).origin;
-        const indexResponse = await fetch(`${origin}/index.html`);
-        if (indexResponse.ok) {
-          return new Response(indexResponse.body, {
-            status: 200,
-            headers: { 'Content-Type': 'text/html' },
-          });
-        }
+        return env.ASSETS.fetch(request);
       }
 
       return new Response(JSON.stringify({ error: 'Not Found' }), {
