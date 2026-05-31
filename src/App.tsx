@@ -205,16 +205,16 @@ function Overview({ status }: { status: any }) {
 
         <div className="glass-panel rounded-xl p-6 space-y-3">
           <div className="flex justify-between items-center text-slate-400">
-            <span className="text-xs font-semibold uppercase tracking-wider">Discord Gateway</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Discord Interactions</span>
             <Activity size={16} className="text-discord-green" />
           </div>
-          <h3 className="text-lg font-bold text-white">Active Mention Listener</h3>
+          <h3 className="text-lg font-bold text-white">Slash Command Endpoint</h3>
           <p className="text-xs text-slate-400">
-            Listens for bot tags in your servers, retrieves context, and triggers the Worker AI endpoint.
+            Verifies Discord interactions, optionally fetches channel history, and replies through the webhook response path.
           </p>
           <div className="flex items-center gap-2 pt-2 text-xs font-semibold">
-            <span className={status?.config?.discordTokenConfigured ? "text-discord-green" : "text-discord-red"}>
-              {status?.config?.discordTokenConfigured ? "● Token Configured" : "○ Token Missing"}
+            <span className={status?.config?.discordPublicKeyConfigured ? "text-discord-green" : "text-discord-red"}>
+              {status?.config?.discordPublicKeyConfigured ? "● Public Key Configured" : "○ Public Key Missing"}
             </span>
           </div>
         </div>
@@ -243,19 +243,19 @@ function Overview({ status }: { status: any }) {
           <ul className="space-y-3 text-xs text-slate-400">
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Mentions Listener:</strong> When users type <code>@GemmaBot Hello!</code>, the Node.js daemon detects the mention.</span>
+              <span><strong>Slash Command:</strong> When users run <code>/gemma prompt:...</code>, Discord sends an interaction to your Worker.</span>
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Context Fetching:</strong> The bot grabs the last 15 messages in the channel/thread to compile conversation context.</span>
+              <span><strong>Context Fetching:</strong> The Worker can pull the last 15 channel messages over the Discord REST API for extra context.</span>
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Edge Inference:</strong> The bot forwards the context to your Cloudflare Worker `/api/chat` which queries Google Gemma.</span>
+              <span><strong>Edge Inference:</strong> The Worker forwards the prompt and context to `/api/chat`, which queries Google Gemma.</span>
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Discord Response:</strong> The worker generates the response and the bot replies in thread/channel.</span>
+              <span><strong>Discord Response:</strong> The Worker defers the interaction, then edits the original slash-command reply when the model finishes.</span>
             </li>
           </ul>
         </div>
@@ -263,10 +263,10 @@ function Overview({ status }: { status: any }) {
         <div className="bg-[#1e1f22] rounded-xl p-6 border border-[#2b2d31] flex flex-col justify-between space-y-4">
           <div className="space-y-2">
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-              <Terminal size={16} className="text-discord-green" /> Bot Quick Test
+              <Terminal size={16} className="text-discord-green" /> Discord REST Quick Test
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Want to make sure your bot is authorized and capable of sending messages? Use our Test Console to push a custom text notification directly to a server channel.
+              Want to make sure your Worker can still send REST messages to Discord? Use the Test Console to push a custom text notification directly to a server channel.
             </p>
           </div>
           <Link
@@ -463,7 +463,7 @@ function SetupGuide({ status }: { status: any }) {
   return (
     <div className="space-y-8 animate-fadeIn">
       <div className="space-y-1">
-        <h2 className="text-xl font-bold text-white">Bot Setup Guide</h2>
+        <h2 className="text-xl font-bold text-white">Slash Command Setup Guide</h2>
         <p className="text-slate-400 text-xs">Steps to register, authorize, and run your Google Gemma Discord Bot.</p>
       </div>
 
@@ -482,8 +482,9 @@ function SetupGuide({ status }: { status: any }) {
             <div className="p-3 bg-[#151618] border border-[#2b2d31] rounded-lg space-y-2">
               <span className="text-[10px] font-bold text-discord-yellow uppercase tracking-wider block">Important Settings:</span>
               <ul className="list-disc pl-4 text-[11px] text-slate-400 space-y-1">
-                <li>Under <strong>Privileged Gateway Intents</strong>, toggle <strong>MESSAGE CONTENT INTENT</strong> to ON (needed to read mention texts).</li>
-                <li>Reset and copy the <strong>Bot Token</strong>. You will need this for the backend configuration.</li>
+                <li>Copy the <strong>Bot Token</strong>. You will use it for REST history fetches and the one-time slash-command registration script.</li>
+                <li>Copy the <strong>Application ID</strong> and <strong>Public Key</strong>. The Application ID is used for command registration; the Public Key is used by the Worker to verify Discord interactions.</li>
+                <li>You do <strong>not</strong> need Message Content Intent for slash commands.</li>
               </ul>
             </div>
           </div>
@@ -547,14 +548,17 @@ function SetupGuide({ status }: { status: any }) {
             <pre className="p-4 bg-[#151618] border border-[#2b2d31] rounded-lg font-mono text-[10px] text-slate-300 overflow-x-auto">
 {`# .dev.vars
 DISCORD_TOKEN="your_bot_token"
+DISCORD_PUBLIC_KEY="your_discord_public_key"
 GOOGLE_CLIENT_ID="your_google_oauth_client_id"
-ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"`}
+ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
+DISCORD_COMMAND_NAME="gemma"`}
             </pre>
             <p className="text-xs text-slate-400">
               To upload secrets to your Cloudflare Worker production deployment:
             </p>
             <pre className="p-3 bg-[#151618] border border-[#2b2d31] rounded-lg font-mono text-[10px] text-slate-300 space-y-1">
               <div>npx wrangler secret put DISCORD_TOKEN</div>
+              <div>npx wrangler secret put DISCORD_PUBLIC_KEY</div>
               <div>npx wrangler secret put GOOGLE_CLIENT_ID</div>
               <div>npx wrangler secret put ALLOWED_EMAILS</div>
             </pre>
@@ -563,23 +567,28 @@ ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"`}
           <div className="bg-[#1e1f22] border border-[#2b2d31] rounded-xl p-6 space-y-4">
             <h3 className="text-sm font-semibold text-white flex items-center gap-2">
               <span className="w-5 h-5 rounded bg-discord-blurple/20 text-discord-blurple text-xs flex items-center justify-center font-bold">4</span>
-              Running the Bot Daemon
+              Register Slash Commands
             </h3>
             <p className="text-xs text-slate-400">
-              Configure the bot gateway client: create a <code>.env</code> file in the root directory:
+              Create a <code>.env</code> file in the root directory for the one-time command registration script:
             </p>
             <pre className="p-4 bg-[#151618] border border-[#2b2d31] rounded-lg font-mono text-[10px] text-slate-300 overflow-x-auto">
 {`# .env
 DISCORD_TOKEN="your_bot_token"
-# Path to your deployed or local worker API
-WORKER_API_URL="http://localhost:8787"`}
+DISCORD_APPLICATION_ID="your_application_id"
+DISCORD_COMMAND_NAME="gemma"
+# Optional: register faster in a single guild while testing
+DISCORD_GUILD_ID="your_guild_id"`}
             </pre>
             <p className="text-xs text-slate-400">
-              Start the bot daemon in your terminal:
+              Register or refresh the slash command definition:
             </p>
             <pre className="p-3 bg-[#151618] border border-[#2b2d31] rounded-lg font-mono text-[10px] text-slate-300">
-npm run start:bot
+npm run register:commands
             </pre>
+            <p className="text-xs text-slate-400">
+              Set your Discord application's <strong>Interactions Endpoint URL</strong> to your Worker route, typically <code>https://your-worker.workers.dev/api/discord/interactions</code>.
+            </p>
           </div>
         </div>
       </div>

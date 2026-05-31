@@ -1,14 +1,14 @@
 {
   "name": "gemma-discord-bot-unified",
   "version": "1.0.0",
-  "description": "Unified Google Gemma Discord Bot (Frontend, CF Worker Backend, and Bot Daemon)",
+  "description": "Unified Google Gemma Discord Bot (Frontend, CF Worker Backend, and Discord Slash Commands)",
   "type": "module",
   "scripts": {
     "dev:frontend": "vite",
     "dev:worker": "wrangler dev",
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
-    "start:bot": "node bot.js"
+    "register:commands": "node scripts/register-discord-commands.mjs"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
