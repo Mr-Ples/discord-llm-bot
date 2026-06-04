@@ -48,6 +48,7 @@ GOOGLE_CLIENT_ID="your_google_oauth_client_id"
 ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
 DISCORD_COMMAND_NAME="chat"
 DISCORD_SYSTEM_COMMAND_NAME="chat_system"
+DISCORD_USER_ALIASES='{"ossi":"totalrecall"}'
 ```
 
 If you want the slash command registration script to run locally, create a `.env` file:
@@ -76,6 +77,7 @@ npx wrangler secret put DISCORD_TOKEN
 npx wrangler secret put DISCORD_PUBLIC_KEY
 npx wrangler secret put GOOGLE_CLIENT_ID
 npx wrangler secret put ALLOWED_EMAILS
+npx wrangler secret put DISCORD_USER_ALIASES
 ```
 
 ## Running Locally
@@ -115,6 +117,8 @@ Optional command arguments:
 - `ephemeral`: whether the response should only be visible to you
 
 Use `/personalities` to list every available personality name and id. Personality replies are prefixed with the personality name, and each personality prompt automatically includes `Be concise.`
+
+The chat command can ping users from natural language requests like `tell ossi do this`. By default, `ossi` resolves to the Discord username `totalrecall`; add more aliases with `DISCORD_USER_ALIASES`, either as JSON like `{"sam":"samantha"}`, JavaScript-style entries like `{'sam':'samantha'}`, or comma-separated pairs like `sam=samantha,alex=alexander`. User lookup requires the command to run in a guild and the bot token to be able to search guild members.
 
 After changing slash commands, re-register them with `npm run register:commands`.
 

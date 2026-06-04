@@ -11,6 +11,7 @@ export interface Env {
   DISCORD_COMMAND_NAME?: string;
   DISCORD_SYSTEM_COMMAND_NAME?: string;
   DISCORD_PERSONALITIES_COMMAND_NAME?: string;
+  DISCORD_USER_ALIASES?: string;
 }
 
 type DiscordCommandOption = {
@@ -43,6 +44,16 @@ type DiscordMessage = {
   system?: boolean;
 };
 
+type DiscordMember = {
+  nick?: string | null;
+  user?: {
+    id?: string;
+    username?: string;
+    global_name?: string | null;
+    bot?: boolean;
+  };
+};
+
 const DEFAULT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const DEFAULT_COMMAND_NAME = 'chat';
 const DEFAULT_SYSTEM_COMMAND_NAME = 'chat_system';
@@ -57,6 +68,9 @@ const DISCORD_INTERACTION_FLAG_EPHEMERAL = 64;
 
 const textEncoder = new TextEncoder();
 const CONCISE_PERSONALITY_INSTRUCTION = 'Be concise.';
+const DEFAULT_USER_ALIASES: Record<string, string> = {
+
+};
 
 type PromptPersonality = {
   id: string;
@@ -185,6 +199,135 @@ function getOptionValue(options: DiscordCommandOption[] | undefined, name: strin
   return options?.find((option) => option.name === name)?.value;
 }
 
+function normalizeUserLookupValue(value: string): string {
+  return value
+    .trim()
+    .replace(/^@+/, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}_.-]+/gu, '');
+}
+
+function parseUserAliases(rawAliases: string | undefined): Map<string, string> {
+  const aliases = new Map<string, string>();
+
+  for (const [alias, lookup] of Object.entries(DEFAULT_USER_ALIASES)) {
+    aliases.set(normalizeUserLookupValue(alias), lookup);
+  }
+
+  if (!rawAliases?.trim()) {
+    return aliases;
+  }
+
+  const trimmedAliases = rawAliases.trim();
+
+  try {
+    const parsed = JSON.parse(trimmedAliases) as Record<string, unknown>;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const [alias, lookup] of Object.entries(parsed)) {
+        if (typeof lookup === 'string' && alias.trim() && lookup.trim()) {
+          aliases.set(normalizeUserLookupValue(alias), lookup.trim());
+        }
+      }
+      return aliases;
+    }
+  } catch {
+    // Fall through to comma/newline parsing.
+  }
+
+  const objectEntries = trimmedAliases.matchAll(/['"]?([\p{L}\p{N}_.-]+)['"]?\s*:\s*['"]([^'"]+)['"]/gu);
+  for (const entry of objectEntries) {
+    const alias = entry[1]?.trim();
+    const lookup = entry[2]?.trim();
+    if (alias && lookup) {
+      aliases.set(normalizeUserLookupValue(alias), lookup);
+    }
+  }
+
+  for (const entry of trimmedAliases.split(/[,\n;]/)) {
+    const [alias, lookup] = entry.split('=').map((part) => part?.trim());
+    if (alias && lookup) {
+      aliases.set(normalizeUserLookupValue(alias), lookup);
+    }
+  }
+
+  return aliases;
+}
+
+function extractTellRequest(prompt: string): { target: string; message: string } | undefined {
+  const match = prompt.match(/^\s*(?:tell|ask|ping|message|msg)\s+(<@!?\d+>|@?[\p{L}\p{N}_.-]+)\s*[:,]?\s+([\s\S]+)$/iu);
+  if (!match) {
+    return undefined;
+  }
+
+  const target = match[1].trim();
+  const message = match[2].trim();
+  const normalizedTarget = normalizeUserLookupValue(target);
+  if (!target || !message || normalizedTarget === 'me') {
+    return undefined;
+  }
+
+  return { target, message };
+}
+
+function getMemberNames(member: DiscordMember): string[] {
+  return [member.user?.username, member.user?.global_name || undefined, member.nick || undefined]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map(normalizeUserLookupValue);
+}
+
+async function resolveMentionTarget(
+  env: Env,
+  guildId: string | undefined,
+  target: string
+): Promise<{ id: string; name: string } | undefined> {
+  const mentionMatch = target.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) {
+    return { id: mentionMatch[1], name: target };
+  }
+
+  const token = env.DISCORD_TOKEN;
+  if (!token || !guildId) {
+    return undefined;
+  }
+
+  const aliases = parseUserAliases(env.DISCORD_USER_ALIASES);
+  const normalizedTarget = normalizeUserLookupValue(target);
+  const lookup = aliases.get(normalizedTarget) || target.replace(/^@+/, '').trim();
+  const normalizedLookup = normalizeUserLookupValue(lookup);
+
+  if (!normalizedLookup) {
+    return undefined;
+  }
+
+  const response = await fetch(
+    `${DISCORD_API_BASE}/guilds/${guildId}/members/search?query=${encodeURIComponent(lookup)}&limit=10`,
+    {
+      headers: {
+        Authorization: `Bot ${token}`,
+        'User-Agent': 'DiscordBot (https://github.com/cloudflare/workers-sdk, 1.0.0)',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to search Discord members: ${response.status} ${await response.text()}`);
+  }
+
+  const members = (await response.json()) as DiscordMember[];
+  const exactMatch = members.find((member) => getMemberNames(member).includes(normalizedLookup));
+  const selectedMember = exactMatch || members[0];
+  const selectedUser = selectedMember?.user;
+
+  if (!selectedUser?.id) {
+    return undefined;
+  }
+
+  return {
+    id: selectedUser.id,
+    name: selectedMember.nick || selectedUser.global_name || selectedUser.username || lookup,
+  };
+}
+
 function cleanMessageContent(content: string, botUserId?: string): string {
   if (!botUserId) return content.trim();
   return content.replace(new RegExp(`<@!?${botUserId}>`, 'g'), '').trim();
@@ -287,14 +430,25 @@ async function runGemma(env: Env, messages: Array<{ role: 'system' | 'user' | 'a
   );
 }
 
-async function editDiscordOriginalResponse(applicationId: string, interactionToken: string, content: string): Promise<void> {
+async function editDiscordOriginalResponse(
+  applicationId: string,
+  interactionToken: string,
+  content: string,
+  allowedUserIds: string[] = []
+): Promise<void> {
   const response = await fetch(`${DISCORD_API_BASE}/webhooks/${applicationId}/${interactionToken}/messages/@original`, {
     method: 'PATCH',
     headers: {
       'Content-Type': 'application/json',
       'User-Agent': 'DiscordBot (https://github.com/cloudflare/workers-sdk, 1.0.0)',
     },
-    body: JSON.stringify({ content }),
+    body: JSON.stringify({
+      content,
+      allowed_mentions: {
+        parse: [],
+        users: allowedUserIds,
+      },
+    }),
   });
 
   if (!response.ok) {
@@ -314,10 +468,17 @@ async function handleDiscordSlashCommand(
   const applicationId = interaction.application_id;
   const interactionToken = interaction.token;
   const channelId = interaction.channel_id;
+  const guildId = interaction.guild_id;
 
   let responseText = '';
+  let mentionTarget: { id: string; name: string } | undefined;
 
   try {
+    const tellRequest = extractTellRequest(prompt);
+    if (tellRequest) {
+      mentionTarget = await resolveMentionTarget(env, guildId, tellRequest.target);
+    }
+
     const promptMessages = [
       { role: 'system' as const, content: systemPrompt },
     ];
@@ -329,7 +490,9 @@ async function handleDiscordSlashCommand(
 
     promptMessages.push({
       role: 'user',
-      content: prompt,
+      content: mentionTarget
+        ? `Write a message to ${mentionTarget.name}. Message request: ${tellRequest?.message || prompt}`
+        : prompt,
     });
 
     responseText = await runGemma(env, promptMessages);
@@ -338,7 +501,8 @@ async function handleDiscordSlashCommand(
   }
 
   const trimmedResponse = responseText.trim();
-  const responseWithSpeaker = speakingAs ? `**${speakingAs}:**\n${trimmedResponse}` : trimmedResponse;
+  const responseWithMention = mentionTarget ? `<@${mentionTarget.id}> ${trimmedResponse}` : trimmedResponse;
+  const responseWithSpeaker = speakingAs ? `**${speakingAs}:**\n${responseWithMention}` : responseWithMention;
   const finalText = trimmedResponse.length > 0
     ? responseWithSpeaker.length > 2000
       ? `${responseWithSpeaker.slice(0, 1995)}...`
@@ -346,7 +510,12 @@ async function handleDiscordSlashCommand(
     : "I processed your request but didn't generate any text. Please try again!";
 
   try {
-    await editDiscordOriginalResponse(applicationId, interactionToken, finalText);
+    await editDiscordOriginalResponse(
+      applicationId,
+      interactionToken,
+      finalText,
+      mentionTarget ? [mentionTarget.id] : []
+    );
   } catch (error) {
     console.error('Failed to edit Discord interaction response:', error);
   }

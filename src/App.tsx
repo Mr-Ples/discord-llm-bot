@@ -552,7 +552,8 @@ DISCORD_PUBLIC_KEY="your_discord_public_key"
 GOOGLE_CLIENT_ID="your_google_oauth_client_id"
 ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
 DISCORD_COMMAND_NAME="chat"
-DISCORD_SYSTEM_COMMAND_NAME="chat_system"`}
+DISCORD_SYSTEM_COMMAND_NAME="chat_system"
+DISCORD_USER_ALIASES='{"ossi":"totalrecall"}'`}
             </pre>
             <p className="text-xs text-slate-400">
               To upload secrets to your Cloudflare Worker production deployment:
@@ -562,6 +563,7 @@ DISCORD_SYSTEM_COMMAND_NAME="chat_system"`}
               <div>npx wrangler secret put DISCORD_PUBLIC_KEY</div>
               <div>npx wrangler secret put GOOGLE_CLIENT_ID</div>
               <div>npx wrangler secret put ALLOWED_EMAILS</div>
+              <div>npx wrangler secret put DISCORD_USER_ALIASES</div>
             </pre>
           </div>
 
