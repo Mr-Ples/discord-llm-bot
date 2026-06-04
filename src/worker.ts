@@ -361,7 +361,13 @@ async function verifyDiscordSignature(request: Request, publicKeyHex: string, bo
   }
 }
 
-async function fetchChannelContext(env: Env, channelId: string, historyLimit: number, botUserId?: string): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
+async function fetchChannelContext(
+  env: Env,
+  channelId: string,
+  historyLimit: number,
+  botUserId?: string,
+  includeAssistantMessages = true
+): Promise<Array<{ role: 'user' | 'assistant'; content: string }>> {
   const token = env.DISCORD_TOKEN;
   if (!token || historyLimit <= 0) {
     return [];
@@ -394,7 +400,7 @@ async function fetchChannelContext(env: Env, channelId: string, historyLimit: nu
     const rawContent = message.content ?? '';
     const content = cleanMessageContent(rawContent, botUserId);
 
-    if (!content) {
+    if (!content || (isBot && !includeAssistantMessages)) {
       continue;
     }
 
@@ -463,6 +469,7 @@ async function handleDiscordSlashCommand(
   prompt: string,
   historyLimit: number,
   systemPrompt: string,
+  includeAssistantHistory: boolean,
   speakingAs?: string
 ): Promise<void> {
   const applicationId = interaction.application_id;
@@ -484,7 +491,7 @@ async function handleDiscordSlashCommand(
     ];
 
     if (channelId && historyLimit > 0) {
-      const historyMessages = await fetchChannelContext(env, channelId, historyLimit);
+      const historyMessages = await fetchChannelContext(env, channelId, historyLimit, undefined, includeAssistantHistory);
       promptMessages.push(...historyMessages);
     }
 
@@ -704,7 +711,16 @@ export default {
         const ephemeral = typeof ephemeralOption === 'boolean' ? ephemeralOption : false;
 
         ctx.waitUntil(
-          handleDiscordSlashCommand(env, interaction, receivedCommandName, prompt, historyLimit, systemPrompt, speakingAs)
+          handleDiscordSlashCommand(
+            env,
+            interaction,
+            receivedCommandName,
+            prompt,
+            historyLimit,
+            systemPrompt,
+            !isSystemChatCommand,
+            speakingAs
+          )
         );
 
         return new Response(
