@@ -10,6 +10,7 @@ export interface Env {
   ALLOWED_EMAILS?: string;
   DISCORD_COMMAND_NAME?: string;
   DISCORD_SYSTEM_COMMAND_NAME?: string;
+  DISCORD_PERSONALITIES_COMMAND_NAME?: string;
 }
 
 type DiscordCommandOption = {
@@ -45,6 +46,7 @@ type DiscordMessage = {
 const DEFAULT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const DEFAULT_COMMAND_NAME = 'chat';
 const DEFAULT_SYSTEM_COMMAND_NAME = 'chat_system';
+const DEFAULT_PERSONALITIES_COMMAND_NAME = 'personalities';
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_INTERACTION_TYPE_PING = 1;
 const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
@@ -54,6 +56,7 @@ const DISCORD_INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE = 5;
 const DISCORD_INTERACTION_FLAG_EPHEMERAL = 64;
 
 const textEncoder = new TextEncoder();
+const CONCISE_PERSONALITY_INSTRUCTION = 'Be concise.';
 
 type PromptPersonality = {
   id: string;
@@ -160,6 +163,22 @@ function findPersonality(value: unknown): PromptPersonality | undefined {
   return PROMPT_PERSONALITIES.find(
     (personality) => personality.id === normalized || normalizePersonalityId(personality.name) === normalized
   );
+}
+
+function withConciseInstruction(prompt: string): string {
+  return `${prompt.trim()}\n\n${CONCISE_PERSONALITY_INSTRUCTION}`;
+}
+
+function formatPersonalityList(commandName: string): string {
+  const lines = PROMPT_PERSONALITIES.map((personality) => `- ${personality.name} (\`${personality.id}\`)`);
+  const text = [
+    `Available personalities:`,
+    ...lines,
+    '',
+    `Use one by setting the \`personality\` option on \`/${commandName}\`.`,
+  ].join('\n');
+
+  return text.length > 2000 ? `${text.slice(0, 1995)}...` : text;
 }
 
 function getOptionValue(options: DiscordCommandOption[] | undefined, name: string): unknown {
@@ -289,7 +308,8 @@ async function handleDiscordSlashCommand(
   commandName: string,
   prompt: string,
   historyLimit: number,
-  systemPrompt: string
+  systemPrompt: string,
+  speakingAs?: string
 ): Promise<void> {
   const applicationId = interaction.application_id;
   const interactionToken = interaction.token;
@@ -317,10 +337,12 @@ async function handleDiscordSlashCommand(
     responseText = `⚠️ I hit an error while handling \`/${commandName}\`:\n\`\`\`\n${error?.message || String(error)}\n\`\`\``;
   }
 
-  const finalText = responseText.trim().length > 0
-    ? responseText.length > 2000
-      ? `${responseText.slice(0, 1995)}...`
-      : responseText
+  const trimmedResponse = responseText.trim();
+  const responseWithSpeaker = speakingAs ? `**${speakingAs}:**\n${trimmedResponse}` : trimmedResponse;
+  const finalText = trimmedResponse.length > 0
+    ? responseWithSpeaker.length > 2000
+      ? `${responseWithSpeaker.slice(0, 1995)}...`
+      : responseWithSpeaker
     : "I processed your request but didn't generate any text. Please try again!";
 
   try {
@@ -336,6 +358,10 @@ export default {
     const path = url.pathname;
     const commandName = normalizeCommandName(env.DISCORD_COMMAND_NAME);
     const systemCommandName = normalizeCommandName(env.DISCORD_SYSTEM_COMMAND_NAME, DEFAULT_SYSTEM_COMMAND_NAME);
+    const personalitiesCommandName = normalizeCommandName(
+      env.DISCORD_PERSONALITIES_COMMAND_NAME,
+      DEFAULT_PERSONALITIES_COMMAND_NAME
+    );
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
@@ -371,6 +397,7 @@ export default {
               whitelistActive: hasAllowedEmails,
               discordCommandName: commandName,
               discordSystemCommandName: systemCommandName,
+              discordPersonalitiesCommandName: personalitiesCommandName,
               googleClientId: env.GOOGLE_CLIENT_ID || '',
             },
             timestamp: new Date().toISOString(),
@@ -422,12 +449,29 @@ export default {
         const receivedCommandName = interaction.data?.name || '';
         const isChatCommand = receivedCommandName === commandName;
         const isSystemChatCommand = receivedCommandName === systemCommandName;
-        if (!isChatCommand && !isSystemChatCommand) {
+        const isPersonalitiesCommand = receivedCommandName === personalitiesCommandName;
+        if (!isChatCommand && !isSystemChatCommand && !isPersonalitiesCommand) {
           return new Response(
             JSON.stringify({
               type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE,
               data: {
                 content: `Unknown command: \`/${receivedCommandName || 'unknown'}\``,
+                flags: DISCORD_INTERACTION_FLAG_EPHEMERAL,
+              },
+            }),
+            {
+              status: 200,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        if (isPersonalitiesCommand) {
+          return new Response(
+            JSON.stringify({
+              type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+              data: {
+                content: formatPersonalityList(commandName),
                 flags: DISCORD_INTERACTION_FLAG_EPHEMERAL,
               },
             }),
@@ -463,6 +507,7 @@ export default {
         }
 
         let systemPrompt = '';
+        let speakingAs: string | undefined;
         if (isSystemChatCommand) {
           systemPrompt = typeof systemPromptOption === 'string' ? systemPromptOption.trim() : '';
           if (!systemPrompt) {
@@ -482,13 +527,16 @@ export default {
           }
         } else {
           const selectedPersonality = findPersonality(personalityOption) || pickRandomPersonality();
-          systemPrompt = selectedPersonality.prompt;
+          systemPrompt = withConciseInstruction(selectedPersonality.prompt);
+          speakingAs = selectedPersonality.name;
         }
 
         const historyLimit = clampInt(historyOption, 15, 0, 100);
         const ephemeral = typeof ephemeralOption === 'boolean' ? ephemeralOption : false;
 
-        ctx.waitUntil(handleDiscordSlashCommand(env, interaction, receivedCommandName, prompt, historyLimit, systemPrompt));
+        ctx.waitUntil(
+          handleDiscordSlashCommand(env, interaction, receivedCommandName, prompt, historyLimit, systemPrompt, speakingAs)
+        );
 
         return new Response(
           JSON.stringify({

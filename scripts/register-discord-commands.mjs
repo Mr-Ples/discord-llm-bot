@@ -8,6 +8,7 @@ const applicationId = process.env.DISCORD_APPLICATION_ID;
 const guildId = process.env.DISCORD_GUILD_ID?.trim();
 const rawCommandName = process.env.DISCORD_COMMAND_NAME || 'chat';
 const rawSystemCommandName = process.env.DISCORD_SYSTEM_COMMAND_NAME || 'chat_system';
+const rawPersonalitiesCommandName = process.env.DISCORD_PERSONALITIES_COMMAND_NAME || 'personalities';
 
 function normalizeCommandName(rawName) {
   return rawName
@@ -69,8 +70,11 @@ function parsePromptPersonalities(markdown) {
 
 const commandName = normalizeCommandName(rawCommandName);
 const systemCommandName = normalizeCommandName(rawSystemCommandName);
+const personalitiesCommandName = normalizeCommandName(rawPersonalitiesCommandName);
 const commandDescription = process.env.DISCORD_COMMAND_DESCRIPTION || 'Chat with a prompted AI personality';
 const systemCommandDescription = process.env.DISCORD_SYSTEM_COMMAND_DESCRIPTION || 'Chat with your own system prompt';
+const personalitiesCommandDescription =
+  process.env.DISCORD_PERSONALITIES_COMMAND_DESCRIPTION || 'List available AI personalities';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const promptsPath = path.resolve(__dirname, '..', 'prompts.md');
 const personalityChoices = parsePromptPersonalities(fs.readFileSync(promptsPath, 'utf8'));
@@ -95,8 +99,13 @@ if (!systemCommandName || systemCommandName.length > 32) {
   process.exit(1);
 }
 
-if (commandName === systemCommandName) {
-  console.error('DISCORD_COMMAND_NAME and DISCORD_SYSTEM_COMMAND_NAME must be different.');
+if (!personalitiesCommandName || personalitiesCommandName.length > 32) {
+  console.error('DISCORD_PERSONALITIES_COMMAND_NAME must resolve to a valid command name between 1 and 32 characters.');
+  process.exit(1);
+}
+
+if (new Set([commandName, systemCommandName, personalitiesCommandName]).size !== 3) {
+  console.error('DISCORD_COMMAND_NAME, DISCORD_SYSTEM_COMMAND_NAME, and DISCORD_PERSONALITIES_COMMAND_NAME must be different.');
   process.exit(1);
 }
 
@@ -158,6 +167,13 @@ const systemChatCommand = {
   ],
 };
 
+const personalitiesCommand = {
+  name: personalitiesCommandName,
+  description: personalitiesCommandDescription,
+  type: 1,
+  dm_permission: true,
+};
+
 const targetPath = guildId
   ? `/applications/${applicationId}/guilds/${guildId}/commands`
   : `/applications/${applicationId}/commands`;
@@ -168,7 +184,7 @@ const response = await fetch(`https://discord.com/api/v10${targetPath}`, {
     Authorization: `Bot ${token}`,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify([chatCommand, systemChatCommand]),
+  body: JSON.stringify([chatCommand, systemChatCommand, personalitiesCommand]),
 });
 
 if (!response.ok) {
@@ -181,6 +197,7 @@ const registeredCommands = await response.json();
 console.log(`Registered ${Array.isArray(registeredCommands) ? registeredCommands.length : 0} slash command(s).`);
 console.log(`Command name: /${commandName}`);
 console.log(`System command name: /${systemCommandName}`);
+console.log(`Personalities command name: /${personalitiesCommandName}`);
 console.log(`Personality choices: ${personalityChoices.length}`);
 if (guildId) {
   console.log(`Scope: guild ${guildId}`);

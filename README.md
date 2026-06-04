@@ -104,6 +104,7 @@ After registering the command, use:
 ```text
 /chat prompt: Tell me a short story about an edge server
 /chat prompt: Tell me a short story about an edge server personality: The Sarcastic Scribe
+/personalities
 /chat_system prompt: Tell me a short story about an edge server system_prompt: You are a concise technical narrator.
 ```
 
@@ -113,4 +114,8 @@ Optional command arguments:
 - `history`: how many recent messages from the channel to include as context
 - `ephemeral`: whether the response should only be visible to you
 
-The Worker defers the interaction immediately, then edits the original slash-command response once Gemini finishes generating the reply.
+Use `/personalities` to list every available personality name and id. Personality replies are prefixed with the personality name, and each personality prompt automatically includes `Be concise.`
+
+After changing slash commands, re-register them with `npm run register:commands`.
+
+The Worker defers chat interactions immediately, then edits the original slash-command response once Gemini finishes generating the reply.
