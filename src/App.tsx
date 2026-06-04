@@ -243,7 +243,7 @@ function Overview({ status }: { status: any }) {
           <ul className="space-y-3 text-xs text-slate-400">
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Slash Command:</strong> When users run <code>/gemma prompt:...</code>, Discord sends an interaction to your Worker.</span>
+              <span><strong>Slash Command:</strong> When users run <code>/chat prompt:...</code> or <code>/chat_system prompt:...</code>, Discord sends an interaction to your Worker.</span>
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
@@ -551,7 +551,8 @@ DISCORD_TOKEN="your_bot_token"
 DISCORD_PUBLIC_KEY="your_discord_public_key"
 GOOGLE_CLIENT_ID="your_google_oauth_client_id"
 ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
-DISCORD_COMMAND_NAME="gemma"`}
+DISCORD_COMMAND_NAME="chat"
+DISCORD_SYSTEM_COMMAND_NAME="chat_system"`}
             </pre>
             <p className="text-xs text-slate-400">
               To upload secrets to your Cloudflare Worker production deployment:
@@ -576,7 +577,8 @@ DISCORD_COMMAND_NAME="gemma"`}
 {`# .env
 DISCORD_TOKEN="your_bot_token"
 DISCORD_APPLICATION_ID="your_application_id"
-DISCORD_COMMAND_NAME="gemma"
+DISCORD_COMMAND_NAME="chat"
+DISCORD_SYSTEM_COMMAND_NAME="chat_system"
 # Optional: register faster in a single guild while testing
 DISCORD_GUILD_ID="your_guild_id"`}
             </pre>

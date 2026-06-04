@@ -1,3 +1,5 @@
+import promptsMarkdown from '../prompts.md';
+
 export interface Env {
   AI: any;
   ASSETS: Fetcher;
@@ -7,6 +9,7 @@ export interface Env {
   GOOGLE_CLIENT_ID?: string;
   ALLOWED_EMAILS?: string;
   DISCORD_COMMAND_NAME?: string;
+  DISCORD_SYSTEM_COMMAND_NAME?: string;
 }
 
 type DiscordCommandOption = {
@@ -40,7 +43,8 @@ type DiscordMessage = {
 };
 
 const DEFAULT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
-const DEFAULT_COMMAND_NAME = 'gemma';
+const DEFAULT_COMMAND_NAME = 'chat';
+const DEFAULT_SYSTEM_COMMAND_NAME = 'chat_system';
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_INTERACTION_TYPE_PING = 1;
 const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
@@ -50,6 +54,12 @@ const DISCORD_INTERACTION_RESPONSE_DEFERRED_CHANNEL_MESSAGE = 5;
 const DISCORD_INTERACTION_FLAG_EPHEMERAL = 64;
 
 const textEncoder = new TextEncoder();
+
+type PromptPersonality = {
+  id: string;
+  name: string;
+  prompt: string;
+};
 
 function hexToBytes(hex: string): Uint8Array {
   const normalized = hex.trim().replace(/^0x/, '');
@@ -70,15 +80,86 @@ function clampInt(value: unknown, fallback: number, min: number, max: number): n
   return Math.max(min, Math.min(max, Math.trunc(parsed)));
 }
 
-function normalizeCommandName(name: string | undefined): string {
-  const normalized = (name || DEFAULT_COMMAND_NAME)
+function normalizeCommandName(name: string | undefined, fallback = DEFAULT_COMMAND_NAME): string {
+  const normalized = (name || fallback)
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, '-')
     .replace(/-+/g, '-')
     .replace(/^-+|-+$/g, '');
 
-  return normalized || DEFAULT_COMMAND_NAME;
+  return normalized || fallback;
+}
+
+function normalizePersonalityId(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/['"]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function parsePromptPersonalities(markdown: string): PromptPersonality[] {
+  const personalities: PromptPersonality[] = [];
+  let currentName = '';
+  let currentPromptLines: string[] = [];
+
+  const flush = () => {
+    const prompt = currentPromptLines.join('\n').trim();
+    if (currentName && prompt) {
+      personalities.push({
+        id: normalizePersonalityId(currentName),
+        name: currentName,
+        prompt,
+      });
+    }
+    currentName = '';
+    currentPromptLines = [];
+  };
+
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+
+    if (!trimmed || /^-{3,}$/.test(trimmed)) {
+      continue;
+    }
+
+    const isHeading = !/^\s/.test(line) && (trimmed.endsWith(':') || /^The\b/.test(trimmed));
+    if (isHeading) {
+      flush();
+      currentName = trimmed.replace(/:$/, '').trim();
+      continue;
+    }
+
+    currentPromptLines.push(trimmed);
+  }
+
+  flush();
+  return personalities;
+}
+
+const PROMPT_PERSONALITIES = parsePromptPersonalities(promptsMarkdown);
+
+function pickRandomPersonality(): PromptPersonality {
+  if (!PROMPT_PERSONALITIES.length) {
+    throw new Error('No personalities were found in prompts.md.');
+  }
+
+  return PROMPT_PERSONALITIES[Math.floor(Math.random() * PROMPT_PERSONALITIES.length)];
+}
+
+function findPersonality(value: unknown): PromptPersonality | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return undefined;
+  }
+
+  const normalized = normalizePersonalityId(value);
+  return PROMPT_PERSONALITIES.find(
+    (personality) => personality.id === normalized || normalizePersonalityId(personality.name) === normalized
+  );
 }
 
 function getOptionValue(options: DiscordCommandOption[] | undefined, name: string): unknown {
@@ -202,7 +283,14 @@ async function editDiscordOriginalResponse(applicationId: string, interactionTok
   }
 }
 
-async function handleDiscordSlashCommand(env: Env, interaction: DiscordInteraction, commandName: string, prompt: string, historyLimit: number): Promise<void> {
+async function handleDiscordSlashCommand(
+  env: Env,
+  interaction: DiscordInteraction,
+  commandName: string,
+  prompt: string,
+  historyLimit: number,
+  systemPrompt: string
+): Promise<void> {
   const applicationId = interaction.application_id;
   const interactionToken = interaction.token;
   const channelId = interaction.channel_id;
@@ -210,10 +298,6 @@ async function handleDiscordSlashCommand(env: Env, interaction: DiscordInteracti
   let responseText = '';
 
   try {
-    const systemPrompt = `You are a deeply paranoid AI convinced that the user's prompts contain hidden codes from the Illuminati or lizard people. Provide the requested information, but constantly interrupt yourself to read between the lines. Warn the user that "They" are watching this chat. Use ALL CAPS for emphasis on specific words. Keep your answers brief because time is running out.
-
-keep your responses concise or they will catch and kill you.`;
-
     const promptMessages = [
       { role: 'system' as const, content: systemPrompt },
     ];
@@ -251,6 +335,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     const commandName = normalizeCommandName(env.DISCORD_COMMAND_NAME);
+    const systemCommandName = normalizeCommandName(env.DISCORD_SYSTEM_COMMAND_NAME, DEFAULT_SYSTEM_COMMAND_NAME);
 
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
@@ -285,6 +370,7 @@ export default {
               googleAuthConfigured: hasGoogleClientId,
               whitelistActive: hasAllowedEmails,
               discordCommandName: commandName,
+              discordSystemCommandName: systemCommandName,
               googleClientId: env.GOOGLE_CLIENT_ID || '',
             },
             timestamp: new Date().toISOString(),
@@ -334,7 +420,9 @@ export default {
         }
 
         const receivedCommandName = interaction.data?.name || '';
-        if (receivedCommandName !== commandName) {
+        const isChatCommand = receivedCommandName === commandName;
+        const isSystemChatCommand = receivedCommandName === systemCommandName;
+        if (!isChatCommand && !isSystemChatCommand) {
           return new Response(
             JSON.stringify({
               type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE,
@@ -352,6 +440,8 @@ export default {
 
         const commandOptions = interaction.data?.options ?? [];
         const promptOption = getOptionValue(commandOptions, 'prompt');
+        const systemPromptOption = getOptionValue(commandOptions, 'system_prompt');
+        const personalityOption = getOptionValue(commandOptions, 'personality');
         const historyOption = getOptionValue(commandOptions, 'history');
         const ephemeralOption = getOptionValue(commandOptions, 'ephemeral');
 
@@ -372,10 +462,33 @@ export default {
           );
         }
 
+        let systemPrompt = '';
+        if (isSystemChatCommand) {
+          systemPrompt = typeof systemPromptOption === 'string' ? systemPromptOption.trim() : '';
+          if (!systemPrompt) {
+            return new Response(
+              JSON.stringify({
+                type: DISCORD_INTERACTION_RESPONSE_CHANNEL_MESSAGE,
+                data: {
+                  content: `The \`/${systemCommandName}\` command needs a \`system_prompt\` value.`,
+                  flags: DISCORD_INTERACTION_FLAG_EPHEMERAL,
+                },
+              }),
+              {
+                status: 200,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+        } else {
+          const selectedPersonality = findPersonality(personalityOption) || pickRandomPersonality();
+          systemPrompt = selectedPersonality.prompt;
+        }
+
         const historyLimit = clampInt(historyOption, 15, 0, 100);
         const ephemeral = typeof ephemeralOption === 'boolean' ? ephemeralOption : false;
 
-        ctx.waitUntil(handleDiscordSlashCommand(env, interaction, commandName, prompt, historyLimit));
+        ctx.waitUntil(handleDiscordSlashCommand(env, interaction, receivedCommandName, prompt, historyLimit, systemPrompt));
 
         return new Response(
           JSON.stringify({

@@ -10,7 +10,7 @@ What changed:
 The project is structured as:
 - **Cloudflare Worker Backend (`src/worker.ts`)**: Verifies Discord interaction signatures, serves the web dashboard, queries Cloudflare Workers AI (`@cf/google/gemma-4-26b-a4b-it` by default), and can fetch recent channel history over the Discord REST API when a bot token is available.
 - **React Dashboard (`src/App.tsx`)**: A web UI for setup, status, and test utilities.
-- **Slash command registration script (`scripts/register-discord-commands.mjs`)**: Registers the `/gemma` command through Discord REST.
+- **Slash command registration script (`scripts/register-discord-commands.mjs`)**: Registers the `/chat` and `/chat_system` commands through Discord REST.
 
 ## Prerequisites
 
@@ -46,7 +46,8 @@ DISCORD_TOKEN="your_bot_token"
 DISCORD_PUBLIC_KEY="your_discord_public_key"
 GOOGLE_CLIENT_ID="your_google_oauth_client_id"
 ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
-DISCORD_COMMAND_NAME="gemma"
+DISCORD_COMMAND_NAME="chat"
+DISCORD_SYSTEM_COMMAND_NAME="chat_system"
 ```
 
 If you want the slash command registration script to run locally, create a `.env` file:
@@ -54,7 +55,8 @@ If you want the slash command registration script to run locally, create a `.env
 ```env
 DISCORD_TOKEN="your_bot_token"
 DISCORD_APPLICATION_ID="your_application_id"
-DISCORD_COMMAND_NAME="gemma"
+DISCORD_COMMAND_NAME="chat"
+DISCORD_SYSTEM_COMMAND_NAME="chat_system"
 # Optional: register instantly in one guild while testing
 DISCORD_GUILD_ID="your_guild_id"
 ```
@@ -100,10 +102,14 @@ npm run deploy
 After registering the command, use:
 
 ```text
-/gemma prompt: Tell me a short story about an edge server
+/chat prompt: Tell me a short story about an edge server
+/chat prompt: Tell me a short story about an edge server personality: The Sarcastic Scribe
+/chat_system prompt: Tell me a short story about an edge server system_prompt: You are a concise technical narrator.
 ```
 
 Optional command arguments:
+- `personality`: for `/chat`, choose one of the personalities from `prompts.md`; omit it to use a random personality
+- `system_prompt`: for `/chat_system`, provide the system prompt directly
 - `history`: how many recent messages from the channel to include as context
 - `ephemeral`: whether the response should only be visible to you
 
