@@ -1,4 +1,4 @@
-import promptsMarkdown from '../prompts.md';
+import personalitiesData from '../personalities.json';
 
 export interface Env {
   AI: any;
@@ -78,6 +78,12 @@ type PromptPersonality = {
   prompt: string;
 };
 
+type RawPromptPersonality = {
+  id?: unknown;
+  name?: unknown;
+  prompt?: unknown;
+};
+
 function hexToBytes(hex: string): Uint8Array {
   const normalized = hex.trim().replace(/^0x/, '');
   if (normalized.length === 0 || normalized.length % 2 !== 0) {
@@ -118,51 +124,26 @@ function normalizePersonalityId(name: string): string {
     .replace(/^_+|_+$/g, '');
 }
 
-function parsePromptPersonalities(markdown: string): PromptPersonality[] {
-  const personalities: PromptPersonality[] = [];
-  let currentName = '';
-  let currentPromptLines: string[] = [];
+function normalizePromptPersonalities(rawPersonalities: RawPromptPersonality[]): PromptPersonality[] {
+  return rawPersonalities.flatMap((rawPersonality) => {
+    const name = typeof rawPersonality.name === 'string' ? rawPersonality.name.trim() : '';
+    const prompt = typeof rawPersonality.prompt === 'string' ? rawPersonality.prompt.trim() : '';
+    const rawId = typeof rawPersonality.id === 'string' ? rawPersonality.id.trim() : '';
+    const id = rawId ? normalizePersonalityId(rawId) : normalizePersonalityId(name);
 
-  const flush = () => {
-    const prompt = currentPromptLines.join('\n').trim();
-    if (currentName && prompt) {
-      personalities.push({
-        id: normalizePersonalityId(currentName),
-        name: currentName,
-        prompt,
-      });
-    }
-    currentName = '';
-    currentPromptLines = [];
-  };
-
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-
-    if (!trimmed || /^-{3,}$/.test(trimmed)) {
-      continue;
+    if (!name || !prompt || !id) {
+      return [];
     }
 
-    const isHeading = !/^\s/.test(line) && (trimmed.endsWith(':') || /^The\b/.test(trimmed));
-    if (isHeading) {
-      flush();
-      currentName = trimmed.replace(/:$/, '').trim();
-      continue;
-    }
-
-    currentPromptLines.push(trimmed);
-  }
-
-  flush();
-  return personalities;
+    return [{ id, name, prompt }];
+  });
 }
 
-const PROMPT_PERSONALITIES = parsePromptPersonalities(promptsMarkdown);
+const PROMPT_PERSONALITIES = normalizePromptPersonalities(personalitiesData);
 
 function pickRandomPersonality(): PromptPersonality {
   if (!PROMPT_PERSONALITIES.length) {
-    throw new Error('No personalities were found in prompts.md.');
+    throw new Error('No personalities were found in personalities.json.');
   }
 
   return PROMPT_PERSONALITIES[Math.floor(Math.random() * PROMPT_PERSONALITIES.length)];

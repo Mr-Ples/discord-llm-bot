@@ -111,7 +111,7 @@ After registering the command, use:
 ```
 
 Optional command arguments:
-- `personality`: for `/chat`, choose one of the personalities from `prompts.md`; omit it to use a random personality
+- `personality`: for `/chat`, choose one of the personalities from `personalities.json`; omit it to use a random personality
 - `system_prompt`: for `/chat_system`, provide the system prompt directly
 - `history`: how many recent messages from the channel to include as context
 - `ephemeral`: whether the response should only be visible to you

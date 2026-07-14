@@ -29,43 +29,20 @@ function normalizePersonalityId(name) {
     .replace(/^_+|_+$/g, '');
 }
 
-function parsePromptPersonalities(markdown) {
-  const personalities = [];
-  let currentName = '';
-  let currentPromptLines = [];
+function readPersonalityChoices(json) {
+  return JSON.parse(json)
+    .flatMap((personality) => {
+      const name = typeof personality.name === 'string' ? personality.name.trim() : '';
+      const rawValue = typeof personality.id === 'string' ? personality.id.trim() : '';
+      const value = rawValue ? normalizePersonalityId(rawValue) : normalizePersonalityId(name);
 
-  const flush = () => {
-    const prompt = currentPromptLines.join('\n').trim();
-    if (currentName && prompt) {
-      personalities.push({
-        name: currentName,
-        value: normalizePersonalityId(currentName),
-      });
-    }
-    currentName = '';
-    currentPromptLines = [];
-  };
+      if (!name || !value) {
+        return [];
+      }
 
-  for (const rawLine of markdown.split(/\r?\n/)) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-
-    if (!trimmed || /^-{3,}$/.test(trimmed)) {
-      continue;
-    }
-
-    const isHeading = !/^\s/.test(line) && (trimmed.endsWith(':') || /^The\b/.test(trimmed));
-    if (isHeading) {
-      flush();
-      currentName = trimmed.replace(/:$/, '').trim();
-      continue;
-    }
-
-    currentPromptLines.push(trimmed);
-  }
-
-  flush();
-  return personalities.slice(0, 25);
+      return [{ name, value }];
+    })
+    .slice(0, 25);
 }
 
 const commandName = normalizeCommandName(rawCommandName);
@@ -76,8 +53,8 @@ const systemCommandDescription = process.env.DISCORD_SYSTEM_COMMAND_DESCRIPTION 
 const personalitiesCommandDescription =
   process.env.DISCORD_PERSONALITIES_COMMAND_DESCRIPTION || 'List available AI personalities';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const promptsPath = path.resolve(__dirname, '..', 'prompts.md');
-const personalityChoices = parsePromptPersonalities(fs.readFileSync(promptsPath, 'utf8'));
+const personalitiesPath = path.resolve(__dirname, '..', 'personalities.json');
+const personalityChoices = readPersonalityChoices(fs.readFileSync(personalitiesPath, 'utf8'));
 
 if (!token) {
   console.error('Missing DISCORD_TOKEN.');
