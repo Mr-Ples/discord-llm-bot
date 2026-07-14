@@ -35,6 +35,7 @@ type DiscordInteraction = {
 };
 
 type DiscordMessage = {
+  id?: string;
   content?: string;
   author?: {
     id?: string;
@@ -42,6 +43,11 @@ type DiscordMessage = {
     bot?: boolean;
   };
   system?: boolean;
+};
+
+type DiscordChannel = {
+  id?: string;
+  parent_id?: string | null;
 };
 
 type DiscordMember = {
@@ -314,6 +320,70 @@ function cleanMessageContent(content: string, botUserId?: string): string {
   return content.replace(new RegExp(`<@!?${botUserId}>`, 'g'), '').trim();
 }
 
+function discordBotHeaders(token: string): HeadersInit {
+  return {
+    Authorization: `Bot ${token}`,
+    'User-Agent': 'DiscordBot (https://github.com/cloudflare/workers-sdk, 1.0.0)',
+  };
+}
+
+function messageToPromptMessage(
+  message: DiscordMessage,
+  botUserId: string | undefined,
+  includeAssistantMessages: boolean,
+  prefix?: string
+): { role: 'user' | 'assistant'; content: string } | undefined {
+  if (message.system) return undefined;
+
+  const authorId = message.author?.id ?? '';
+  const isBot = botUserId ? authorId === botUserId : !!message.author?.bot;
+  const rawContent = message.content ?? '';
+  const content = cleanMessageContent(rawContent, botUserId);
+
+  if (!content || (isBot && !includeAssistantMessages)) {
+    return undefined;
+  }
+
+  const authorContent = isBot && message.author?.username
+    ? content
+    : message.author?.username
+      ? `${message.author.username}: ${content}`
+      : content;
+
+  return {
+    role: isBot ? 'assistant' : 'user',
+    content: prefix ? `${prefix}${authorContent}` : authorContent,
+  };
+}
+
+async function fetchThreadStarterMessage(token: string, channelId: string): Promise<DiscordMessage | undefined> {
+  const channelResponse = await fetch(`${DISCORD_API_BASE}/channels/${channelId}`, {
+    headers: discordBotHeaders(token),
+  });
+
+  if (!channelResponse.ok) {
+    return undefined;
+  }
+
+  const channel = (await channelResponse.json()) as DiscordChannel;
+  const parentChannelId = channel.parent_id;
+  const threadMessageId = channel.id || channelId;
+
+  if (!parentChannelId || !threadMessageId) {
+    return undefined;
+  }
+
+  const messageResponse = await fetch(`${DISCORD_API_BASE}/channels/${parentChannelId}/messages/${threadMessageId}`, {
+    headers: discordBotHeaders(token),
+  });
+
+  if (!messageResponse.ok) {
+    return undefined;
+  }
+
+  return (await messageResponse.json()) as DiscordMessage;
+}
+
 async function verifyDiscordSignature(request: Request, publicKeyHex: string, bodyText: string): Promise<boolean> {
   const signature = request.headers.get('x-signature-ed25519');
   const timestamp = request.headers.get('x-signature-timestamp');
@@ -359,11 +429,9 @@ async function fetchChannelContext(
     return [];
   }
 
+  const threadStarterMessage = await fetchThreadStarterMessage(token, channelId);
   const response = await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages?limit=${limit}`, {
-    headers: {
-      Authorization: `Bot ${token}`,
-      'User-Agent': 'DiscordBot (https://github.com/cloudflare/workers-sdk, 1.0.0)',
-    },
+    headers: discordBotHeaders(token),
   });
 
   if (!response.ok) {
@@ -372,23 +440,20 @@ async function fetchChannelContext(
 
   const messages = (await response.json()) as DiscordMessage[];
   const promptMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  const threadStarterPromptMessage =
+    threadStarterMessage && !messages.some((message) => message.id === threadStarterMessage.id)
+      ? messageToPromptMessage(threadStarterMessage, botUserId, includeAssistantMessages, 'Thread starter: ')
+      : undefined;
+
+  if (threadStarterPromptMessage) {
+    promptMessages.push(threadStarterPromptMessage);
+  }
 
   for (const message of messages.reverse()) {
-    if (message.system) continue;
-
-    const authorId = message.author?.id ?? '';
-    const isBot = botUserId ? authorId === botUserId : !!message.author?.bot;
-    const rawContent = message.content ?? '';
-    const content = cleanMessageContent(rawContent, botUserId);
-
-    if (!content || (isBot && !includeAssistantMessages)) {
-      continue;
+    const promptMessage = messageToPromptMessage(message, botUserId, includeAssistantMessages);
+    if (promptMessage) {
+      promptMessages.push(promptMessage);
     }
-
-    promptMessages.push({
-      role: isBot ? 'assistant' : 'user',
-      content: isBot && message.author?.username ? content : message.author?.username ? `${message.author.username}: ${content}` : content,
-    });
   }
 
   return promptMessages;
