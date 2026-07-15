@@ -49,6 +49,7 @@ ALLOWED_EMAILS="your.email@gmail.com,another@gmail.com"
 DISCORD_COMMAND_NAME="chat"
 DISCORD_SYSTEM_COMMAND_NAME="chat_system"
 DISCORD_USER_ALIASES='{"ossi":"totalrecall"}'
+GEMMA_MAX_OUTPUT_TOKENS="4096"
 ```
 
 If you want the slash command registration script to run locally, create a `.env` file:
@@ -113,7 +114,7 @@ After registering the command, use:
 Optional command arguments:
 - `personality`: for `/chat`, choose one of the personalities from `personalities.json`; omit it to use a random personality
 - `system_prompt`: for `/chat_system`, provide the system prompt directly
-- `history`: how many recent messages from the channel to include as context
+- `history`: how many recent messages from the channel to include as context, up to 300
 - `ephemeral`: whether the response should only be visible to you
 
 Use `/personalities` to list every available personality name and id. Personality replies are prefixed with the personality name, and each personality prompt automatically includes `Be concise.`
@@ -122,4 +123,4 @@ The chat command can ping users from natural language requests like `tell ossi d
 
 After changing slash commands, re-register them with `npm run register:commands`.
 
-The Worker defers chat interactions immediately, then edits the original slash-command response once Gemini finishes generating the reply.
+The Worker defers chat interactions immediately, then edits the original slash-command response once Gemini finishes generating the reply. Long replies are split into Discord follow-up messages instead of being truncated.

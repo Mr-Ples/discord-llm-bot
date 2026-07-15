@@ -99,7 +99,7 @@ const sharedOptions = [
     type: 4,
     required: false,
     min_value: 0,
-    max_value: 100,
+    max_value: 300,
   },
   {
     name: 'ephemeral',

@@ -6,6 +6,7 @@ export interface Env {
   DISCORD_TOKEN?: string;
   DISCORD_PUBLIC_KEY?: string;
   GEMMA_MODEL?: string;
+  GEMMA_MAX_OUTPUT_TOKENS?: string;
   GOOGLE_CLIENT_ID?: string;
   ALLOWED_EMAILS?: string;
   DISCORD_COMMAND_NAME?: string;
@@ -64,6 +65,12 @@ const DEFAULT_MODEL = '@cf/google/gemma-4-26b-a4b-it';
 const DEFAULT_COMMAND_NAME = 'chat';
 const DEFAULT_SYSTEM_COMMAND_NAME = 'chat_system';
 const DEFAULT_PERSONALITIES_COMMAND_NAME = 'personalities';
+const DEFAULT_HISTORY_LIMIT = 15;
+const MAX_HISTORY_MESSAGES = 300;
+const DISCORD_HISTORY_PAGE_LIMIT = 100;
+const DISCORD_MESSAGE_LIMIT = 2000;
+const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+const MAX_OUTPUT_TOKENS = 8192;
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const DISCORD_INTERACTION_TYPE_PING = 1;
 const DISCORD_INTERACTION_TYPE_APPLICATION_COMMAND = 2;
@@ -424,21 +431,41 @@ async function fetchChannelContext(
     return [];
   }
 
-  const limit = Math.max(0, Math.min(historyLimit, 100));
+  const limit = Math.max(0, Math.min(historyLimit, MAX_HISTORY_MESSAGES));
   if (limit === 0) {
     return [];
   }
 
   const threadStarterMessage = await fetchThreadStarterMessage(token, channelId);
-  const response = await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages?limit=${limit}`, {
-    headers: discordBotHeaders(token),
-  });
+  const messages: DiscordMessage[] = [];
+  let before: string | undefined;
 
-  if (!response.ok) {
-    throw new Error(`Failed to fetch channel history: ${response.status} ${await response.text()}`);
+  while (messages.length < limit) {
+    const pageLimit = Math.min(DISCORD_HISTORY_PAGE_LIMIT, limit - messages.length);
+    const params = new URLSearchParams({ limit: String(pageLimit) });
+    if (before) {
+      params.set('before', before);
+    }
+
+    const response = await fetch(`${DISCORD_API_BASE}/channels/${channelId}/messages?${params.toString()}`, {
+      headers: discordBotHeaders(token),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch channel history: ${response.status} ${await response.text()}`);
+    }
+
+    const pageMessages = (await response.json()) as DiscordMessage[];
+    messages.push(...pageMessages);
+
+    const lastMessage = pageMessages[pageMessages.length - 1];
+    if (pageMessages.length < pageLimit || !lastMessage?.id) {
+      break;
+    }
+
+    before = lastMessage.id;
   }
 
-  const messages = (await response.json()) as DiscordMessage[];
   const promptMessages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   const threadStarterPromptMessage =
     threadStarterMessage && !messages.some((message) => message.id === threadStarterMessage.id)
@@ -469,8 +496,10 @@ async function runGemma(env: Env, messages: Array<{ role: 'system' | 'user' | 'a
   }
 
   const activeModel = env.GEMMA_MODEL || DEFAULT_MODEL;
+  const maxTokens = clampInt(env.GEMMA_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS, 1, MAX_OUTPUT_TOKENS);
   const aiResponse = await env.AI.run(activeModel, {
     messages,
+    max_tokens: maxTokens,
   });
 
   return (
@@ -508,6 +537,80 @@ async function editDiscordOriginalResponse(
   }
 }
 
+async function sendDiscordFollowupResponse(
+  applicationId: string,
+  interactionToken: string,
+  content: string,
+  allowedUserIds: string[] = [],
+  ephemeral = false
+): Promise<void> {
+  const response = await fetch(`${DISCORD_API_BASE}/webhooks/${applicationId}/${interactionToken}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'DiscordBot (https://github.com/cloudflare/workers-sdk, 1.0.0)',
+    },
+    body: JSON.stringify({
+      content,
+      flags: ephemeral ? DISCORD_INTERACTION_FLAG_EPHEMERAL : undefined,
+      allowed_mentions: {
+        parse: [],
+        users: allowedUserIds,
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to send Discord follow-up response: ${response.status} ${await response.text()}`);
+  }
+}
+
+function splitDiscordMessage(content: string, limit = DISCORD_MESSAGE_LIMIT): string[] {
+  if (content.length <= limit) {
+    return [content];
+  }
+
+  const chunks: string[] = [];
+  let remaining = content;
+
+  while (remaining.length > limit) {
+    const lineBreakIndex = remaining.lastIndexOf('\n', limit);
+    const splitIndex = lineBreakIndex > 0 ? lineBreakIndex : limit;
+    chunks.push(remaining.slice(0, splitIndex).trimEnd());
+    remaining = remaining.slice(splitIndex).trimStart();
+  }
+
+  if (remaining.length > 0) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
+function buildDiscordResponseChunks(
+  message: string,
+  mentionTarget?: { id: string; name: string },
+  speakingAs?: string
+): string[] {
+  const mentionPrefix = mentionTarget ? `<@${mentionTarget.id}> ` : '';
+  const messageChunks = splitDiscordMessage(`${mentionPrefix}${message}`);
+
+  if (!speakingAs) {
+    return messageChunks;
+  }
+
+  const footer = `||Personality: ${speakingAs}||`;
+  const lastChunkIndex = messageChunks.length - 1;
+  const lastChunkWithFooter = `${messageChunks[lastChunkIndex]}\n\n${footer}`;
+
+  if (lastChunkWithFooter.length <= DISCORD_MESSAGE_LIMIT) {
+    messageChunks[lastChunkIndex] = lastChunkWithFooter;
+    return messageChunks;
+  }
+
+  return [...messageChunks, footer];
+}
+
 async function handleDiscordSlashCommand(
   env: Env,
   interaction: DiscordInteraction,
@@ -516,7 +619,8 @@ async function handleDiscordSlashCommand(
   historyLimit: number,
   systemPrompt: string,
   includeAssistantHistory: boolean,
-  speakingAs?: string
+  speakingAs?: string,
+  ephemeral = false
 ): Promise<void> {
   const applicationId = interaction.application_id;
   const interactionToken = interaction.token;
@@ -554,21 +658,27 @@ async function handleDiscordSlashCommand(
   }
 
   const trimmedResponse = responseText.trim();
-  const responseWithMention = mentionTarget ? `<@${mentionTarget.id}> ${trimmedResponse}` : trimmedResponse;
-  const responseWithSpeaker = speakingAs ? `**${speakingAs}:**\n${responseWithMention}` : responseWithMention;
-  const finalText = trimmedResponse.length > 0
-    ? responseWithSpeaker.length > 2000
-      ? `${responseWithSpeaker.slice(0, 1995)}...`
-      : responseWithSpeaker
-    : "I processed your request but didn't generate any text. Please try again!";
+  const finalResponseChunks = trimmedResponse.length > 0
+    ? buildDiscordResponseChunks(trimmedResponse, mentionTarget, speakingAs)
+    : ["I processed your request but didn't generate any text. Please try again!"];
 
   try {
     await editDiscordOriginalResponse(
       applicationId,
       interactionToken,
-      finalText,
+      finalResponseChunks[0],
       mentionTarget ? [mentionTarget.id] : []
     );
+
+    for (const chunk of finalResponseChunks.slice(1)) {
+      await sendDiscordFollowupResponse(
+        applicationId,
+        interactionToken,
+        chunk,
+        [],
+        ephemeral
+      );
+    }
   } catch (error) {
     console.error('Failed to edit Discord interaction response:', error);
   }
@@ -753,7 +863,7 @@ export default {
           speakingAs = selectedPersonality.name;
         }
 
-        const historyLimit = clampInt(historyOption, 15, 0, 100);
+        const historyLimit = clampInt(historyOption, DEFAULT_HISTORY_LIMIT, 0, MAX_HISTORY_MESSAGES);
         const ephemeral = typeof ephemeralOption === 'boolean' ? ephemeralOption : false;
 
         ctx.waitUntil(
@@ -765,7 +875,8 @@ export default {
             historyLimit,
             systemPrompt,
             !isSystemChatCommand,
-            speakingAs
+            speakingAs,
+            ephemeral
           )
         );
 
@@ -881,8 +992,10 @@ export default {
         }
 
         const activeModel = env.GEMMA_MODEL || DEFAULT_MODEL;
+        const maxTokens = clampInt(env.GEMMA_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS, 1, MAX_OUTPUT_TOKENS);
         const aiResponse = await env.AI.run(activeModel, {
           messages,
+          max_tokens: maxTokens,
         });
 
         const responseText =

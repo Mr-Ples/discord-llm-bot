@@ -229,7 +229,7 @@ function Overview({ status }: { status: any }) {
             Zero-cold-start serverless API returning structured replies with a customizable message cap.
           </p>
           <div className="flex items-center gap-2 pt-2 text-xs text-slate-400">
-            <span>Context Capped: 15 messages</span>
+            <span>Context Capped: 300 messages</span>
           </div>
         </div>
       </div>
@@ -247,7 +247,7 @@ function Overview({ status }: { status: any }) {
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
-              <span><strong>Context Fetching:</strong> The Worker can pull the last 15 channel messages over the Discord REST API for extra context.</span>
+              <span><strong>Context Fetching:</strong> The Worker can pull up to the last 300 channel messages over the Discord REST API for extra context.</span>
             </li>
             <li className="flex gap-2">
               <ChevronRight size={14} className="shrink-0 text-discord-blurple mt-0.5" />
